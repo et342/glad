@@ -22,7 +22,7 @@ fn main() {
     window.set_key_polling(true);
     window.make_current();
 
-    gl::load(|e| glfw.get_proc_address_raw(e) as *const std::os::raw::c_void);
+    gl::load(|e| glfw.get_proc_address_raw(e.as_str()) as *const std::os::raw::c_void);
 
     glfw.poll_events();
 
