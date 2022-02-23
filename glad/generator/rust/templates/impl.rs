@@ -42,31 +42,29 @@ impl FnName {
 #[derive(Copy, Clone)]
 struct FnPtr {
     ptr: *const c_void,
-    is_loaded: bool
 }
 
 #[allow(dead_code)]
 impl FnPtr {
-    fn new(ptr: *const c_void) -> FnPtr {
-        if !ptr.is_null() {
-            FnPtr { ptr, is_loaded: true }
-        } else {
-            FnPtr { ptr: FnPtr::not_initialized as *const c_void, is_loaded: false }
+    const fn new(ptr: *const c_void) -> FnPtr {
+        FnPtr {
+            ptr
         }
     }
 
     fn set_ptr(&mut self, ptr: *const c_void) {
-        *self = Self::new(ptr);
+        self.ptr = ptr;
+    }
+
+    fn is_loaded(self) -> bool {
+        !self.ptr.is_null()
     }
 
     fn aliased(&mut self, other: &FnPtr) {
-        if !self.is_loaded && other.is_loaded {
+        if !self.is_loaded() && other.is_loaded() {
             *self = *other;
         }
     }
-
-    #[inline(never)]
-    fn not_initialized() -> ! { panic!("{{ feature_set.name }}: function not initialized") }
 }
 
 unsafe impl Sync for FnPtr {}
@@ -97,8 +95,13 @@ pub mod functions {
 
     macro_rules! func {
         ($fun:ident, $ret:ty, $($name:ident: $typ:ty),*) => {
-            #[inline] pub unsafe fn $fun({{ '&self, ' if options.mx }}$($name: $typ),*) -> $ret {
-                transmute::<_, extern "system" fn($($typ),*) -> $ret>({{ 'self.' if options.mx else 'storage::' }}$fun.ptr)($($name),*)
+            #[inline]
+            #[track_caller]
+            pub unsafe fn $fun({{ '&self, ' if options.mx }}$($name: $typ),*) -> $ret {
+                if {{ 'self.' if options.mx else 'storage::' }}$fun.is_loaded() {
+                    return transmute::<_, extern "system" fn($($typ),*) -> $ret>({{ 'self.' if options.mx else 'storage::' }}$fun.ptr)($($name),*);
+                }
+                panic!(concat!("{{ feature_set.name }}: function '", stringify!($fun), "' wasn't loaded"));
             }
         }
     }
@@ -129,11 +132,10 @@ mod storage {
     #![allow(non_snake_case, non_upper_case_globals)]
 
     use super::FnPtr;
-    use std::os::raw::*;
 
     macro_rules! store {
         ($name:ident) => {
-            pub(super) static mut $name: FnPtr = FnPtr { ptr: FnPtr::not_initialized as *const c_void, is_loaded: false };
+            pub(super) static mut $name: FnPtr = FnPtr::new(std::ptr::null());
         }
     }
 
